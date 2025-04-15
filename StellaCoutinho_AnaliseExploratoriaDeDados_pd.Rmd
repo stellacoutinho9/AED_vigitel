@@ -1,0 +1,300 @@
+---
+title: "AED - Vigitel RJ 2023"
+author: "Stella Coutinho"
+date: "2025-04-15"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(readxl)
+library(dplyr)
+library(summarytools)
+library(GGally)
+library(ggplot2)
+library(ggpubr)
+library(mice)
+library(naniar)
+library(shiny)
+```
+
+## Introdução
+
+O objetivo deste relatório é aplicar conceitos de Estatística e Ciência de Dados utilizando a base de dados Vigitel 2023 - Rio de Janeiro. Serão realizadas análises descritivas, avaliação da normalidade das variáveis, análise de completude e imputação de dados faltantes.
+A base Vigitel 2023 foi escolhida por conter informações autodeclaradas sobre saúde, alimentação, atividade física e outras variáveis relacionadas. A base é representativa da população adulta das capitais brasileiras, sendo ideal para análises quantitativas.
+
+[Vigitel 2023 - Dados Públicos](https://svs.aids.gov.br/download/Vigitel/)
+
+### Seleção de Variáveis Numéricas
+
+Para esta análise, foram escolhidas quatro variáveis numéricas que são relevantes relevantes para políticas públicas de saúde e ações preventivas para a saúde da população:
+
+- **peso**: Peso (em kg)
+- **idade**: Idade (em anos)
+- **altura**: Altura (em metros)
+- **dias_atividade**: Número de dias na semana em que o indivíduo realiza atividade física 
+
+As variáveis foram escolhidas por sua relevância clínica e por apresentarem dados faltantes (necessários para a análise de imputação).
+
+```{r}
+# Importando base
+dados <- read_excel("Vigitel-2023-peso-rake.xlsx")
+dados <- dados |> 
+  mutate(across(where(is.character), ~ iconv(.x, from = "", to = "UTF-8", sub = " ")))
+names(dados) <- iconv(names(dados), from = "latin1", to = "UTF-8")
+
+# Selecionando e renomeando variáveis de interesse
+df1 <- dados %>% filter(cidade == 21) %>%
+  select(peso = q9, idade = q6, altura = q11, dias_atividade = q45)
+df1[df1 == 777 | df1 == 888] <- NA
+head(df1)
+
+```
+
+### Descrição Estatística das Variáveis
+
+
+```{r}
+library(summarytools)
+descr(df1, stats = "common")
+```
+A tabela acima apresenta medidas como média, mediana, mínimo, máximo, desvio padrão, entre outros. Dados que ajudam a entender a distribuição das variáveis, presença de outliers e variação geral.
+
+### Matriz de Dispersão entre as Variáveis
+
+```{r}
+library(GGally)
+
+# Gerando a matriz de dispersão
+ggpairs(df1,
+        title = "Matriz de Dispersão entre as Variáveis Numéricas",
+        aes(alpha = 0.5))
+
+```
+
+
+### Análise Visual das Correlações
+
+As correlações mais relevantes são, altura x peso (correlação positiva), faz sentido biologicamente, pois pessoas mais altas costumam pesar mais, e altura x idade (correlação negativa), indica uma tendência de redução na estatura com o avançar da idade, o que é compatível com alterações fisiológicas naturais do envelhecimento, como perda de massa óssea e mudanças posturais.
+
+As demais variáveis não apresentam correlações fortes ou significativas, indicando que, dentro da amostra, peso, idade, altura e prática de atividade física não se relacionam de maneira linear evidente na maioria dos casos.
+
+### Verificação da Normalidade das Variáveis
+
+#### O que é uma Distribuição Normal?
+
+A distribuição normal é um tipo de distribuição de dados onde a maioria dos valores fica em torno da média, formando uma curva em formato de sino. Isso significa que é comum encontrar valores próximos da média, e menos comum encontrar valores muito altos ou muito baixos. Esse padrão aparece com frequência em dados do mundo real, como altura ou peso das pessoas.
+
+---
+
+### Histogramas das Variáveis
+
+
+```{r}
+# Remover valores ausentes para cada variável individualmente
+df_clean <- df1 %>% filter(!is.na(peso), !is.na(idade), !is.na(altura), !is.na(dias_atividade))
+
+variaveis <- c("peso", "idade", "altura", "dias_atividade")
+
+# Função para calcular o número de bins usando a fórmula de Sturges
+calcular_bins <- function(data) {
+  n <- length(data)
+  bins <- ceiling(log2(n) + 1)
+  return(bins)
+}
+
+# Calcular o número de bins para cada variável
+num_bins_por_variavel <- sapply(variaveis, function(var) {
+  var_data <- df_clean[[var]]
+  calcular_bins(var_data)
+})
+print(num_bins_por_variavel)
+
+
+# Histograma para peso
+ggplot(df1, aes(x = peso)) + 
+  geom_histogram(bins = 10, binwidth = 10, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Histograma de Peso", x = "Peso (kg)", y = "Frequência")
+
+# Histograma para idade
+ggplot(df1, aes(x = idade)) + 
+  geom_histogram(bins = 10, binwidth = 10, fill = "green", color = "black", alpha = 0.7) +
+  labs(title = "Histograma de Idade", x = "Idade (anos)", y = "Frequência")
+
+# Histograma para altura
+ggplot(df1, aes(x = altura)) + 
+  geom_histogram(bins = 10, binwidth = 10, fill = "red", color = "black", alpha = 0.7) +
+  labs(title = "Histograma de Altura", x = "Altura (cm)", y = "Frequência")
+
+# Histograma para dias de atividade
+ggplot(df1, aes(x = dias_atividade)) + 
+  geom_histogram(bins = 10, binwidth = 1, fill = "purple", color = "black", alpha = 0.7) +
+  labs(title = "Histograma de Dias de Atividade", x = "Dias de Atividade", y = "Frequência")
+
+```
+
+#### Justificativa da escolha do número de bins:
+
+Foi utilizada a regra de Sturges para determinar um número adequado de bins com base no tamanho da amostra. Essa regra é comumente usada para garantir uma boa visualização da distribuição dos dados.
+
+### Gráficos Q-Q (Quantil-Quantil)
+
+Os gráficos Q-Q comparam a distribuição dos dados observados com a distribuição normal teórica. Se os pontos estiverem aproximadamente sobre a linha reta, podemos assumir que a variável segue uma distribuição normal.
+
+```{r qqplot, message=FALSE, warning=FALSE}
+library(ggpubr)
+
+plots <- lapply(names(df1), function(var) {
+  ggqqplot(df1[[var]], title = paste("Q-Q Plot -", var), color = "steelblue")
+})
+
+ggarrange(plotlist = plots, ncol = 2, nrow = 2)
+```
+
+### Teste de Normalidade Shapiro-Wilk
+
+O teste de Shapiro-Wilk avalia a hipótese de que os dados seguem uma distribuição normal. Para esse teste, utilizamos:
+
+H₀: os dados seguem uma distribuição normal;
+
+H₁: os dados não seguem uma distribuição normal.
+
+
+```{r shapiro, message=FALSE, warning=FALSE}
+shapiro_results <- sapply(df1, function(x) {
+  shapiro.test(x)$p.value
+})
+
+shapiro_results
+```
+
+#### Conclusão sobre Normalidade
+
+Todos os p-valores são extremamente baixos, bem menores do que o nível de significância de 0,05. Portanto, rejeitamos a hipótese nula (H₀) de que as variáveis seguem uma distribuição normal. Isso indica que nenhuma das variáveis (peso, idade, altura e dias de atividade) segue uma distribuição normal, de acordo com o teste de Shapiro-Wilk.
+
+Mesmo que o teste rejeite a normalidade, a distribuição pode ser considerada "normal o bastante" para análises exploratórias, pois os gráficos mostram uma forma de sino razoável e os resíduos se comportam bem em 3 das 4 variáveis.
+
+
+### Completude dos Dados
+
+Completude dos dados quer dizer o quanto as informações de um conjunto de dados estão “preenchidas”. Se todos os campos têm valores, os dados são completos. Se existem espaços em branco ou informações faltando, os dados são incompletos.
+Isso é importante porque, quanto mais dados faltam, mais difícil fica entender a realidade por trás daqueles números. Além disso, dados incompletos podem atrapalhar análises, gerar resultados errados ou até impedir que certos tipos de estudo sejam feitos.
+Em resumo: dados completos = análises mais confiáveis. Quando falta muita informação, é preciso tomar cuidado extra na hora de tirar conclusões.
+Cálculo da Completude para as Variáveis
+
+
+```{r}
+# Calcular a completude (porcentagem de dados não faltantes)
+completude <- colSums(!is.na(df1)) / nrow(df1) * 100
+completude
+completude_df <- data.frame(
+  Variaveis = names(completude),
+  Completude = completude
+)
+
+ggplot(completude_df, aes(x = reorder(Variaveis, Completude), y = Completude)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  theme_minimal() +
+  coord_flip() +
+  labs(
+    title = "Completude das Variáveis no Conjunto de Dados Vigitel",
+    x = "Variáveis",
+    y = "Completude (%)"
+  )
+
+```
+
+
+### Imputação de Dados Usando o Pacote MICE
+
+```{r}
+# Carregar o pacote MICE
+library(mice)
+
+# Imputação usando o MICE
+imputacao <- mice(df1, m = 5, method = 'pmm', seed = 123)
+
+# Resumo da imputação
+summary(imputacao)
+
+# Combinar as imputações
+dados_imputados <- complete(imputacao, 1) # Seleciona a primeira imputação
+
+```
+
+## Dashboard Shiny
+
+
+```{r, eval = FALSE}
+
+library(shiny)
+library(ggplot2)
+library(colourpicker)
+
+ui <- fluidPage(
+  titlePanel("Dashboard Interativo"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      # Seletor para escolher a variavel
+      selectInput("var", "Selecione a variavel:", 
+                  choices = names(df1)),
+      
+      # Seletor de cor
+      colourInput("lineColor", "Escolha a cor da linha:", value = "blue"),
+      
+      # Ajuste do eixo X
+      numericInput("xMin", "Limite inferior do eixo X:", value = 1),
+      numericInput("xMax", "Limite superior do eixo X:", value = 100),
+      
+      # Ajuste do eixo Y
+      numericInput("yMin", "Limite inferior do eixo Y:", value = 0),
+      numericInput("yMax", "Limite superior do eixo Y:", value = 100)
+    ),
+    
+    mainPanel(
+      # Grafico de linha
+      plotOutput("linePlot")
+    )
+  )
+)
+
+# Definir o servidor
+server <- function(input, output) {
+  
+  output$linePlot <- renderPlot({
+    # Variavel selecionada
+    selectedVar <- input$var
+    
+    # Dados a serem plotados
+    plotData <- df1[[selectedVar]]
+    
+    # Grafico com limites ajustados e cor selecionada
+    ggplot(data.frame(x = 1:length(plotData), y = plotData), aes(x = x, y = y)) +
+      geom_line(color = input$lineColor) +
+      scale_x_continuous(limits = c(input$xMin, input$xMax)) +
+      scale_y_continuous(limits = c(input$yMin, input$yMax)) +
+      labs(title = paste("Grafico de Linha de", selectedVar),
+           x = "Indice",
+           y = selectedVar)
+  })
+}
+
+# Rodar a aplicação
+shinyApp(ui = ui, server = server)
+
+```
+
+![Figura 1: Interface do Dashboard Shiny](img1.jpeg)
+![Figura 2: Interface do Dashboard Shiny](img2.jpeg)
+
+### [Código Dashboard Shiny](https://github.com/stellacoutinho9/AED_vigitel/blob/ea032d07f8bfe7f1e8b5cf90c7b2a66d3bb9808e/app.R)
+
+#### Considerações Finais
+
+A análise permitiu uma melhor compreensão dos hábitos e características da população entrevistada no Vigitel RJ 2023. A presença de dados faltantes reforça a importância de técnicas adequadas de tratamento de dados para garantir a qualidade das inferências estatísticas. O uso de métodos como a imputação múltipla (MICE) é essencial nesse contexto.
+
+Além disso, o trabalho demonstrou como a exploração gráfica e estatística pode revelar padrões relevantes para políticas públicas de saúde e ações preventivas.
+
